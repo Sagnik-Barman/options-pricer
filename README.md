@@ -64,16 +64,39 @@ interpolate. `vol_surface.py` generates a synthetic-but-realistic market
 noise) and fits SVI back to it per maturity — the RMSE printed for each
 maturity is the fit quality, in vol points.
 
-## Using real market data instead of the synthetic surface
+## Real SPY options (`real_surface.py`)
 
-`vol_surface.py`'s `synthetic_market_quotes()` exists because this
-environment has no internet access to pull a live options chain — swap it
-for a loader that reads a CSV of `(strike, expiry, bid_iv, ask_iv)` from
-your broker or a vendor (CBOE, OptionMetrics, a broker API) and everything
-downstream — the SVI fit, the plots — works unchanged. That's the one
-component of this repo worth upgrading to real data before you put it on
-your resume; the pricing math itself doesn't need live data to prove it's
-correct.
+```bash
+pip install yfinance
+python real_surface.py                                     # live chain; run during US market hours
+python real_surface.py --quotes output/real/quotes_SPY.csv # refit the saved chain, no internet needed
+```
+
+Checked-in result (SPY chain saved in `output/real/quotes_SPY.csv`, 4 expiries
+from 30 to 182 days, out-of-the-money options only, forward from put-call
+parity):
+
+- Raw SVI per slice: **0.11 vol points** mean RMSE over **858** quotes (13
+  outliers removed by a 4-MAD filter, all in the 182-day slice). All 4 slices
+  pass Gatheral's butterfly condition, and total variance increases with
+  maturity across the strike range every expiry actually quotes.
+- ATM skew (d implied vol / d log-moneyness at the money): -6.3, -5.3, -4.8
+  and -3.6 vol points per 0.1 of log-moneyness at 30, 61, 92 and 182 days:
+  the usual equity skew, flattening with maturity.
+- The 30-day slice fits a *positive* SVI rho (0.47). That is not a claim
+  that SPY has upside skew: the quotes run from k = -0.35 to only +0.11, so
+  the smile's minimum sits at the edge of the data and rho trades off against
+  m and sigma. The ATM skew above, which the data does pin down, is negative.
+- SSVI surface for comparison (3 global parameters + one ATM variance per
+  expiry, free of calendar and butterfly arbitrage by construction): global
+  rho -0.50, mean RMSE 0.86 vol points. The gap to raw SVI is the price of
+  imposing no-arbitrage through the parametrisation instead of checking it.
+
+SPY options are American. For out-of-the-money options on an index ETF the
+early-exercise premium is small, and the forward is backed out of put-call
+parity at the money (which also absorbs the dividend yield), so a European
+model is a reasonable approximation here; it would not be for deep
+in-the-money puts.
 
 ## What to be ready to explain in an interview
 
@@ -84,10 +107,10 @@ correct.
 - **Put-call parity** as a free sanity check: `C - P = S*e^(-qT) - K*e^(-rT)`
   should hold between your call and put prices to numerical precision —
   worth adding as an automated test if you extend this.
-- **SVI's static-arbitrage conditions** — not enforced here — require
-  `b*(1+|rho|) <= 4/T` (roughly, "the wings can't be too steep relative to
-  maturity") to avoid butterfly arbitrage. Worth mentioning you know this
-  constraint exists even if you haven't wired up the check.
+- **SVI's static-arbitrage conditions**: `real_surface.py` checks Gatheral's
+  butterfly condition g(k) >= 0 on every slice and the calendar condition
+  (total variance non-decreasing in T) between slices; the SSVI fit enforces
+  both by construction.
 
 ## Extensions worth doing if you have more time
 
@@ -97,5 +120,4 @@ correct.
   surface.
 - Put-call parity as an automated consistency test across the whole strike
   grid.
-- A real options-chain loader (see above) plus staleness/outlier filtering
-  on the quotes before fitting.
+- Real options-chain loader with outlier filtering: done (`real_surface.py`).
